@@ -434,12 +434,33 @@ async function transferToActiveTab(record) {
     throw new Error(`${domain} のマッピング未登録（/admin/dom-mapping で設定）`);
   }
 
-  const items = mappings
-    .filter((m) => m.is_active !== 0 && record[m.questionnaire_field] != null && record[m.questionnaire_field] !== "")
-    .map((m) => ({ field: m.questionnaire_field, xpath: m.xpath, value: String(record[m.questionnaire_field]) }));
+  // 同じXPathに複数フィールドが紐付けられている場合は値を ", " で結合
+  // 例: phone と address が同じXPathに紐付けられた備考欄なら "090-xxxx-xxxx, 神奈川県..." と書き込む
+  const xpathGroups = new Map();
+  for (const m of mappings) {
+    if (m.is_active === 0) continue;
+    const val = record[m.questionnaire_field];
+    if (val == null || val === "") continue;
+    const key = m.xpath;
+    if (!xpathGroups.has(key)) {
+      xpathGroups.set(key, { xpath: m.xpath, fields: [], values: [] });
+    }
+    const g = xpathGroups.get(key);
+    g.fields.push(m.questionnaire_field);
+    g.values.push(String(val));
+  }
+  const items = Array.from(xpathGroups.values()).map((g) => ({
+    field: g.fields.join("+"), // 結合フィールド名（"phone+address" 等）
+    xpath: g.xpath,
+    value: g.values.join(", "),
+  }));
 
   if (items.length === 0) {
     throw new Error("転写対象の値が空");
+  }
+  if (debugMode) {
+    const merged = items.filter((it) => it.field.includes("+"));
+    if (merged.length > 0) log("info", "transfer-merge", `結合: ${merged.map(m => m.field).join(" / ")}`);
   }
 
   let results;

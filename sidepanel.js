@@ -509,7 +509,40 @@ async function transferToActiveTab(record) {
   if (ngList.length > 0) {
     log("warn", "transfer-partial", ngList.map((r) => `${r.field}:${r.reason}`).join(", "));
   }
+
+  // サーバー側に転写ログ送信（失敗してもユーザー操作は止めない）
+  sendTransferLog({
+    record_id: record && record.id,
+    domain,
+    ok_fields: results.filter((r) => r.ok).map((r) => r.field),
+    ng_fields: ngList.map((r) => ({ field: r.field, reason: r.reason || "" })),
+  }).catch(() => {});
+
   return { ok: okCount, total: results.length, ngList };
+}
+
+async function sendTransferLog(payload) {
+  if (!currentTenant) return;
+  try {
+    const body = {
+      record_id: payload.record_id,
+      domain: payload.domain,
+      ok_fields: payload.ok_fields,
+      ng_fields: payload.ng_fields,
+      pc_name: currentTenant, // 拡張側で店舗キーをpc_name代わりに送る（後でPC毎の識別子に拡張可能）
+    };
+    const res = await fetch(
+      `${API_BASE}/api/${encodeURIComponent(currentTenant)}/transfer-log`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
+    if (!res.ok && debugMode) log("warn", "transfer-log-send", `HTTP ${res.status}`);
+  } catch (e) {
+    if (debugMode) log("warn", "transfer-log-send", e.message);
+  }
 }
 
 // ---- Questionnaire ----
